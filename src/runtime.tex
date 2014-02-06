@@ -1,0 +1,189 @@
+%%%presentation%%%\documentclass[aspectratio=169]{beamer}
+%%%handout%%%\documentclass[handout]{beamer}
+%%%notes%%%\documentclass[handout]{beamer}
+
+\usetheme{CambridgeUS}
+\usecolortheme{lily}
+\usepackage[latin1,utf8]{inputenc}
+\usepackage{verbatim}
+\usepackage{hyperref}
+\usepackage{pgfpages}
+\usepackage{amssymb,amsmath}
+\usepackage{minted} %using patched version included in dir, provides autogobble option
+\usepackage{hscode}
+\usemintedstyle{tango}
+
+%Haskell code environment found in hsenv.sty
+\newminted[hsframe]{haskell}{frame=single,linenos,autogobble,xleftmargin=1cm}
+\newmint[hsline]{haskell}{}
+\makeatletter
+\newenvironment<>{hscode}
+    {\VerbatimEnvironment
+     \minted@resetoptions
+     \setkeys{minted@opt}{frame=single,linenos,mathescape,autogobble,xleftmargin=1cm}
+     \begin{onlyenv}#1
+     \begin{VerbatimOut}{\jobname.pyg}
+    }
+    {\end{VerbatimOut}
+     \minted@pygmentize{haskell}
+     \end{onlyenv}
+     \DeleteFile{\jobname.pyg}
+    }
+\makeatother
+
+%To disable double wide presentation for notes
+%%%withnotes%%%\setbeameroption{show notes on second screen}
+
+%To Generate Notes
+%%%notes%%%\setbeameroption{show only notes}
+%%%notes%%%\pgfpagesuselayout{2 on 1}[letterpaper, border shrink=1cm]
+
+%To Generate handouts
+%%%handout%%%\pgfpagesuselayout{2 on 1}[letterpaper,border shrink=1cm]
+\title{Haskell at Runtime}
+\author{Zachary Stigall}
+\date{\today}
+\institute[\the\year]{Boulder Haskell Programmers}
+
+\begin{document}
+% \setbeamertemplate{caption}{\insertcaption}
+
+\maketitle
+
+% \begin{frame}[allowframebreaks,t]{What Are We Covering}
+%     \tableofcontents
+% \end{frame}
+
+% \section{Definitions}
+% \begin{frame}[t]{Thunk}
+%     \begin{definition}
+%         A \alert{Thunk} is something that is yet to be evaluated.
+%     \end{definition}
+% \end{frame}
+
+% \begin{frame}[t]{Weak Head Normal Form}
+%     \begin{definition}
+%         We know what it looks like, but haven't evaluted it fully.
+%     \end{definition}
+%     \begin{figure}
+%         \includegraphics[width=.4\paperwidth]{../img/whnf.png}
+%         \caption{Source: \url{http://en.wikibooks.org/wiki/Haskell/Laziness}}
+%     \end{figure}
+% \end{frame}
+
+\section{GHC}
+\begin{frame}[t]{What Does GHC Do?}
+    \begin{itemize}
+        \item<2-> Desugars Haskell code into Core.
+        \item<5-> Applies Optimizations to Core
+        \item<6-> Converts Core into STG
+        \item<7-> Compiles STG to C-{}- (kinda)
+        \item<8-> C-{}- is then compiled to LLVM / C / Machine Code
+        \item<9-> Packs on the Haskell Runtime System (RTS)
+    \end{itemize}
+
+    \begin{definition}<3->
+        \alert{Core} is GHC's intermediate language based on System FC, with a couple additions.
+    \end{definition}
+
+    \begin{definition}<4->
+        \alert{System F} is a Polymorphic Lambda Calculus language, \alert{FC} adds GADTS to it.
+    \end{definition}
+\end{frame}
+
+\section{RTS}
+\subsection{Overview}
+\begin{frame}[t]{RTS}
+    The RTS provides:
+    \begin{itemize}[<+->]
+        \item Garbage Collection
+        \item Scheduler
+        \item Execution of non-compiled code
+        \item Dynamic Linker
+        \item Profiler
+        \item Software Transactional Memory
+    \end{itemize}
+\end{frame}
+
+\subsection{GC}
+\begin{frame}[t]{GC}
+    \begin{itemize}[<+->]
+        \item Very Efficient - Generational (Out of necessity)
+        \item Data does not point to younger generations
+        \item This lets the GC just remove all non-pointed to data at GC
+    \end{itemize}
+
+    \uncover<+->{Links:\\
+        \href{http://www.haskell.org/haskellwiki/GHC/Memory_Management}{Broad Overview}\\
+        \href{https://ghc.haskell.org/trac/ghc/wiki/Commentary/Rts/Storage}{Way too in depth (ghc.haskell.org)}
+    }
+\end{frame}
+
+\begin{frame}[t]{GC - Flags}
+    \uncover<+->{These require program is compiled with `-rtsopts'.\\}
+    \uncover<+->{This does not cover all options, just the most common.}
+    \begin{itemize}[<+->]
+        \item \alert{-A[size]} sets allocated area for GC (default 512K)
+        \item \alert{-H[size]} suggested Heap size. (size optional)
+        \item \alert{-c[n]} does compacting, use only when you need to drastically reduce RAM usage
+        \item \alert{-qg} parallel GC
+    \end{itemize}
+
+    \uncover<+->{Recommended \alert{ghc-gc-tune} - Allows profiling of varying -A and -H parameters}
+\end{frame}
+
+\subsection{Scheduler}
+\begin{frame}[t,fragile]{Scheduler}
+    Horribly Complicated
+    \begin{itemize}[<+->]
+        \item Centered around the Run Queue
+        \item The Run Queue is a dispatcher for Capabilities
+        \item Capabilities are virtual CPU's that execute Thread State Objects (TSO)
+        \item TSO's are essentially closures and are GC'ed
+    \end{itemize}
+
+    \uncover<5->{Links:\\
+        \href{https://ghc.haskell.org/trac/ghc/wiki/Commentary/Rts/Scheduler}{Very Detailed (ghc.haskell.org)}\\
+        \href{http://blog.ezyang.com/2013/01/the-ghc-scheduler/}{Nice blog post by Edward Z. Yang}
+    }
+\end{frame}
+
+\subsection{Profiling}
+\begin{frame}[t]{Basic Profiling}
+    \begin{itemize}
+        \item<1-> All profiling will require the program compiled with \alert{-rtsopts}
+        \item<2-> For some basic (but very detailed) profiling compile with \alert{-prof -fprof-auto -rtsopts}
+        \item<3-> Run with Prog [ARGS] +RTS [RTS-OPTS]
+        \item<4-> \alert{-s} gives a summary
+        \item<5-> \alert{-p} writes Prog.prof with tons of details
+    \end{itemize}
+    \uncover<6->{Demo\\}
+
+    \begin{itemize}
+        \item<7-> You can also tell GHC that you want analysis on a specific part by inserting your own cost center
+        \item<8-> \alert{\{-\# SCC "CC-Name" \#-\} (expression)}
+    \end{itemize}
+    \uncover<9->{More Demo\\}
+\end{frame}
+
+\begin{frame}[t]{Heap Profiling}
+    \uncover<+->{Same compile opts as last time\\}
+    \uncover<+->{\alert{-hy} as an RTS-OPT, produces a Prog.hp, this can be converted to postscript with hp2ps\\}
+    \uncover<+->{Demo\\}
+\end{frame}
+
+\begin{frame}[t]{Other Profiling}
+    \begin{itemize}[<+->]
+        \item \alert{-B} Sound Bell at GC
+        \item \alert{-xc} Print Stack Trace on exception
+        \item \alert{-M} Set Max Heap size
+    \end{itemize}
+\end{frame}
+
+\section{Closing}
+\begin{frame}[t]{That's It}
+    Questions? \\
+    My GitHub: \url{http://github.com/ZirroStig}
+\end{frame}
+
+\end{document}
